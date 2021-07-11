@@ -1,0 +1,4 @@
+CPU=cortex-m0
+TARGET_SHORT=STM32F0
+
+include targets/_generic

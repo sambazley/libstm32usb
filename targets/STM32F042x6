@@ -1,0 +1,3 @@
+CFLAGS += -DSTM32F0_PA11_PA12_RMP
+
+include targets/_STM32F0

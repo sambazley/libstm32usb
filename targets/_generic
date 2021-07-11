@@ -1,0 +1,8 @@
+CFLAGS += -D$(TARGET) -D$(TARGET_SHORT) -mcpu=$(CPU) -mthumb
+
+ST_HEADERS ?= /opt/STM32/$(TARGET_SHORT)
+
+CFLAGS += -I$(ST_HEADERS)
+
+libusb.a: usblib.o
+	$(AR) rcs $@ $^
