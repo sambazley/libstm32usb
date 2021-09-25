@@ -27,18 +27,63 @@
 #define FROM_PMA(x) (x + USB_PMAADDR)
 #define TO_PMA(x) (x - USB_PMAADDR)
 
-struct buf_desc_entry {
-	volatile uint16_t addr;
-	volatile uint16_t count;
-} __attribute__((packed));
+#define PMA_TX 0
+#define PMA_RX 1
 
-struct buf_desc {
-	struct buf_desc_entry tx, rx;
-} __attribute__((packed));
+#define BTABLE_ADDR 0
+#define BTABLE_COUNT 1
 
-#define btable ((volatile struct buf_desc *) USB_PMAADDR)
+typedef uint16_t pma_addr;
 
 static struct usb_configuration *conf;
+
+static void pma_write_word(pma_addr addr, uint16_t value)
+{
+	*(volatile uint16_t *) FROM_PMA(addr) = value;
+}
+
+static void pma_write_halfword(pma_addr addr, uint16_t value)
+{
+	*(volatile uint8_t *) FROM_PMA(addr) = value;
+}
+
+static uint16_t pma_read_word(pma_addr addr)
+{
+	return *(volatile uint16_t *) FROM_PMA(addr);
+}
+
+static uint8_t pma_read_halfword(pma_addr addr)
+{
+	return *(volatile uint8_t *) FROM_PMA(addr);
+}
+
+static void pma_read_buf(void *dest, pma_addr src, uint16_t n)
+{
+	char *d = dest;
+	if (src % 2) {
+		uint8_t half = pma_read_halfword(src);
+		*d++ = half;
+		src++;
+		n--;
+	}
+
+	for (; n & ~1; n -= 2) {
+		uint16_t word = pma_read_word(src);
+		*(uint16_t *) d = word;
+		d += 2;
+		src += 2;
+	}
+
+	if ((src % 2) ^ (n % 2)) {
+		uint8_t half = pma_read_halfword(src);
+		*d = half;
+	}
+}
+
+static pma_addr btable(uint8_t ep, uint8_t isrx, uint8_t reg)
+{
+	return ep * 8 + isrx * 4 + reg * 2;
+}
 
 static void log_str(const char *str)
 {
@@ -54,9 +99,9 @@ static void log_int(uint32_t n)
 	}
 }
 
-uint16_t *usb_pma_addr(uint8_t ep, uint8_t isrx)
+static pma_addr pma_ep_addr(uint8_t ep, uint8_t isrx)
 {
-	uint16_t addr = conf->endpoint_count * sizeof(struct buf_desc);
+	uint16_t addr = conf->endpoint_count * 8;
 
 	for (int i = 0; i < ep; i++) {
 		addr += conf->endpoints[i].tx_size;
@@ -67,7 +112,7 @@ uint16_t *usb_pma_addr(uint8_t ep, uint8_t isrx)
 		addr += conf->endpoints[ep].tx_size;
 	}
 
-	return (uint16_t *) FROM_PMA(addr);
+	return (pma_addr) addr;
 }
 
 static void usb_set_irq()
@@ -77,23 +122,27 @@ static void usb_set_irq()
 		USB_CNTR_RESETM;
 }
 
-static void set_ep_rx_count(volatile struct buf_desc_entry *e, int count)
+static void set_ep_rx_count(pma_addr addr, int count)
 {
+	uint16_t val;
+
 	if (count > 62) {
-		e->count = 0x8000 | (((count >> 5) - 1) << 10);
+		val = 0x8000 | (((count >> 5) - 1) << 10);
 	} else {
-		e->count = (count >> 1) << 10;
+		val = (count >> 1) << 10;
 	}
+
+	pma_write_word(addr, val);
 }
 
-uint16_t usb_ep_get_rx_count(int ep)
+static uint16_t get_ep_rx_count(uint8_t ep)
 {
 	if (conf->endpoints[ep].type == USB_EP_ISOCHRONOUS &&
 			!(*USB_EP(ep) & USB_EP_DTOG_RX)) {
-		return btable[ep].tx.count & 0x3ff;
+		return pma_read_word(btable(ep, PMA_TX, BTABLE_COUNT)) & 0x3ff;
 	}
 
-	return btable[ep].rx.count & 0x3ff;
+	return pma_read_word(btable(ep, PMA_RX, BTABLE_COUNT)) & 0x3ff;
 }
 
 void usb_ep_set_tx_status(uint8_t ep, uint16_t status)
@@ -112,10 +161,10 @@ static volatile struct usb_transmit_data {
 	const uint8_t *data;
 } usb_tx_data [8];
 
-static void usb_continue_send_data(int ep)
+static void usb_continue_send_data(uint8_t ep)
 {
 	volatile struct usb_transmit_data *tx = &usb_tx_data[ep];
-	uint16_t *dest = usb_pma_addr(ep, PMA_TX);
+	pma_addr dest = pma_ep_addr(ep, PMA_TX);
 	uint8_t tx_length = tx->length - tx->sent;
 
 	if (tx->wLength != 0 && tx_length > tx->wLength) {
@@ -125,13 +174,13 @@ static void usb_continue_send_data(int ep)
 	}
 
 	for (int i = 0; i < tx_length; i += 2) {
-		*dest++ = tx->data[i] | ((uint16_t) tx->data[i + 1] << 8);
+		pma_write_word(dest + i, tx->data[i] | ((uint16_t) tx->data[i + 1] << 8));
 	}
 
 	tx->data += tx_length;
 	tx->sent += tx_length;
 
-	btable[ep].tx.count = tx_length;
+	pma_write_word(btable(ep, PMA_TX, BTABLE_COUNT), tx_length);
 
 	usb_ep_set_tx_status(ep, USB_EP_TX_VALID);
 }
@@ -207,7 +256,7 @@ void usb_ack(uint8_t ep)
 	usb_send_data(ep, 0, 0, 0);
 }
 
-static void on_control_out_interface(volatile struct usb_setup_packet *sp)
+static void on_control_out_interface(struct usb_setup_packet *sp)
 {
 	for (int i = 0; i < conf->interface_count; i++) {
 		struct usb_interface *iface = conf->interfaces + i;
@@ -265,17 +314,17 @@ static void on_control_out_device(volatile struct usb_setup_packet *sp)
 static void on_control_out()
 {
 	if (USB->EP0R & USB_EP_SETUP) {
-		volatile struct usb_setup_packet *sp =
-			(volatile struct usb_setup_packet *) usb_pma_addr(0, PMA_RX);
+		struct usb_setup_packet sp;
+		pma_read_buf(&sp, pma_ep_addr(0, PMA_RX), sizeof(sp));
 
-		uint8_t recipient = sp->bmRequestType & 0x1f;
+		volatile uint8_t recipient = sp.bmRequestType & 0x1f;
 
 		switch (recipient) {
 		case RECIP_DEVICE:
-			on_control_out_device(sp);
+			on_control_out_device(&sp);
 			break;
 		case RECIP_INTERFACE:
-			on_control_out_interface(sp);
+			on_control_out_interface(&sp);
 			return;
 		default:
 			log_str("Recipient ");
@@ -307,7 +356,19 @@ static void on_correct_transfer()
 		if (ep == 0) {
 			on_control_out();
 		} else {
-			conf->on_correct_transfer(0x80 | ep);
+			uint8_t data [256];
+			uint8_t isrx;
+			uint8_t len = get_ep_rx_count(ep);
+
+			if (conf->endpoints[ep].type == USB_EP_ISOCHRONOUS &&
+					!(*USB_EP(ep) & USB_EP_DTOG_RX)) {
+				isrx = PMA_TX;
+			} else {
+				isrx = PMA_RX;
+			}
+
+			pma_read_buf(data, pma_ep_addr(ep, isrx), len);
+			conf->on_correct_transfer(0x80 | ep, data, len);
 		}
 
 		*USB_EP(ep) = *USB_EP(ep) & ~USB_EP_CTR_RX & USB_EPREG_MASK;
@@ -323,7 +384,7 @@ static void on_correct_transfer()
 		if (ep == 0) {
 			on_control_in();
 		} else {
-			conf->on_correct_transfer(ep);
+			conf->on_correct_transfer(ep, 0, 0);
 		}
 
 		*USB_EP(ep) = *USB_EP(ep) & ~USB_EP_CTR_TX & USB_EPREG_MASK;
@@ -352,24 +413,28 @@ static void open_endpoints()
 
 		switch (ep->type) {
 		case USB_EP_CONTROL:
-			set_ep_rx_count(&btable[i].rx, ep->rx_size);
+			set_ep_rx_count(btable(i, PMA_RX, BTABLE_COUNT),
+					ep->rx_size);
 			usb_ep_set_rx_status(i, USB_EP_RX_VALID);
 			usb_ep_set_tx_status(i, USB_EP_TX_NAK);
 			break;
 		case USB_EP_ISOCHRONOUS:
 			if (ep->dir == DIR_OUT) {
-				set_ep_rx_count(&btable[i].rx, ep->rx_size);
-				set_ep_rx_count(&btable[i].tx, ep->tx_size);
+				set_ep_rx_count(btable(i, PMA_RX, BTABLE_COUNT),
+						ep->rx_size);
+				set_ep_rx_count(btable(i, PMA_TX, BTABLE_COUNT),
+						ep->tx_size);
 				usb_ep_set_rx_status(i, USB_EP_RX_VALID);
 			}
 			break;
 		case USB_EP_INTERRUPT:
 		case USB_EP_BULK:
 			if (ep->dir == DIR_OUT) {
-				set_ep_rx_count(&btable[i].rx, ep->rx_size);
+				set_ep_rx_count(btable(i, PMA_RX, BTABLE_COUNT),
+						ep->rx_size);
 				usb_ep_set_rx_status(i, USB_EP_RX_VALID);
 			} else {
-				usb_ep_set_tx_status(i,USB_EP_TX_NAK);
+				usb_ep_set_tx_status(i, USB_EP_TX_NAK);
 			}
 			break;
 		default:
@@ -426,10 +491,10 @@ void usb_init(struct usb_configuration *_conf)
 	USB->BCDR |= USB_BCDR_DPPU;
 
 	for (unsigned int i = 0; i < conf->endpoint_count; i++) {
-		uint32_t rx = (uint32_t) usb_pma_addr(i, PMA_RX);
-		uint32_t tx = (uint32_t) usb_pma_addr(i, PMA_TX);
-		btable[i].rx.addr = TO_PMA(rx);
-		btable[i].tx.addr = TO_PMA(tx);
+		uint16_t rx = pma_ep_addr(i, PMA_RX);
+		uint16_t tx = pma_ep_addr(i, PMA_TX);
+		pma_write_word(btable(i, PMA_RX, BTABLE_ADDR), rx);
+		pma_write_word(btable(i, PMA_TX, BTABLE_ADDR), tx);
 	}
 
 	usb_selected_config = 0;

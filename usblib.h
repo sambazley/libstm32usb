@@ -23,12 +23,12 @@
 #include <stdint.h>
 
 struct usb_setup_packet {
-	volatile uint8_t bmRequestType;
-	volatile uint8_t bRequest;
-	volatile uint16_t wValue;
-	volatile uint16_t wIndex;
-	volatile uint16_t wLength;
-} __attribute__((packed));
+	uint8_t bmRequestType;
+	uint8_t bRequest;
+	uint16_t wValue;
+	uint16_t wIndex;
+	uint16_t wLength;
+};
 
 struct usb_endpoint {
 	const uint16_t rx_size, tx_size;
@@ -39,8 +39,7 @@ struct usb_endpoint {
 struct usb_interface {
 	const uint16_t index;
 	uint16_t alternate;
-	void (*on_ctrl)
-		(struct usb_interface *, volatile struct usb_setup_packet *);
+	void (*on_ctrl) (struct usb_interface *, struct usb_setup_packet *);
 };
 
 struct usb_descriptor {
@@ -59,23 +58,15 @@ struct usb_configuration {
 	uint8_t interface_count;
 	uint8_t descriptor_count;
 
-	void (*on_correct_transfer)(uint8_t ep);
+	void (*on_correct_transfer)(uint8_t ep, uint8_t *data, uint8_t len);
 	void (*log_str)(const char *str);
 	void (*log_int)(uint32_t n);
 };
 
 #define USB_EP(x) (&USB->EP0R + x * 2)
 
-#define PMA_TX 0
-#define PMA_RX 1
-
-uint16_t *usb_pma_addr(uint8_t ep, uint8_t isrx);
-void usb_pma_memcpy(uint16_t *dest, const uint16_t *src, uint16_t n);
-
 uint8_t usb_get_selected_config();
 uint8_t usb_has_received_request();
-
-uint16_t usb_ep_get_rx_count(int ep);
 
 void usb_ep_set_tx_status(uint8_t ep, uint16_t status);
 void usb_ep_set_rx_status(uint8_t ep, uint16_t status);

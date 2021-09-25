@@ -8,7 +8,11 @@ CFLAGS += -std=c99 -Wall -Wextra -Wpedantic
 
 CFLAGS += -I/usr/arm-none-eabi/include/
 
+ifeq ($(DEBUG),1)
+CFLAGS += -Og -ggdb
+else
 CFLAGS += -O2
+endif
 
 ifdef TARGET
 include targets/$(TARGET)
