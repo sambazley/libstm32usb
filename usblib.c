@@ -336,8 +336,6 @@ static void on_control_out()
 
 static void on_control_in()
 {
-	usb_ep_set_rx_status(0, USB_EP_RX_VALID);
-
 	if (address) {
 		USB->DADDR = address | USB_DADDR_EF;
 		address = 0;
@@ -375,14 +373,20 @@ static void on_correct_transfer()
 
 		if (remaining) {
 			usb_continue_send_data(ep);
-		} else if ((usb_tx_data[ep].length % usb_tx_data[ep].wLength) == 0) {
-			usb_ack(ep);
+		} else {
+			if ((usb_tx_data[ep].length % usb_tx_data[ep].wLength) == 0) {
+				usb_ack(ep);
+			}
+
+			if (ep == 0) {
+				on_control_in();
+			} else {
+				conf->on_correct_transfer(ep, 0, 0);
+			}
 		}
 
 		if (ep == 0) {
-			on_control_in();
-		} else {
-			conf->on_correct_transfer(ep, 0, 0);
+			usb_ep_set_rx_status(0, USB_EP_RX_VALID);
 		}
 
 		*USB_EP(ep) = *USB_EP(ep) & ~USB_EP_CTR_TX & USB_EPREG_MASK;
