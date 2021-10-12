@@ -185,9 +185,7 @@ static void usb_continue_send_data(uint8_t ep)
 	usb_ep_set_tx_status(ep, USB_EP_TX_VALID);
 }
 
-static void usb_send_data(uint8_t endpoint,
-		const uint8_t *data,
-		uint16_t length,
+void usb_send_data(uint8_t endpoint, const uint8_t *data, uint16_t length,
 		uint16_t wLength)
 {
 	usb_tx_data[endpoint].data = data;

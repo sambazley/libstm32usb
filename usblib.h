@@ -68,6 +68,9 @@ struct usb_configuration {
 uint8_t usb_get_selected_config();
 uint8_t usb_has_received_request();
 
+void usb_send_data(uint8_t endpoint, const uint8_t *data, uint16_t length,
+		uint16_t wLength);
+
 void usb_ep_set_tx_status(uint8_t ep, uint16_t status);
 void usb_ep_set_rx_status(uint8_t ep, uint16_t status);
 
