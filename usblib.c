@@ -364,7 +364,7 @@ static void on_correct_transfer()
 			}
 
 			pma_read_buf(data, pma_ep_addr(ep, isrx), len);
-			conf->on_correct_transfer(0x80 | ep, data, len);
+			conf->on_correct_transfer(ep, data, len);
 		}
 
 		*USB_EP(ep) = *USB_EP(ep) & ~USB_EP_CTR_RX & USB_EPREG_MASK;
@@ -381,7 +381,7 @@ static void on_correct_transfer()
 			if (ep == 0) {
 				on_control_in();
 			} else {
-				conf->on_correct_transfer(ep, 0, 0);
+				conf->on_correct_transfer(0x80 | ep, 0, 0);
 			}
 		}
 
