@@ -466,6 +466,10 @@ void usb_irq()
 	}
 
 	if (USB->ISTR & USB_ISTR_RESET) {
+		if (conf->on_reset) {
+			conf->on_reset();
+		}
+
 		usb_selected_config = 0;
 		USB->DADDR = USB_DADDR_EF;
 		open_endpoints();

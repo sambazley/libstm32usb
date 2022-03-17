@@ -59,6 +59,7 @@ struct usb_configuration {
 	uint8_t descriptor_count;
 
 	void (*on_correct_transfer)(uint8_t ep, uint8_t *data, uint8_t len);
+	void (*on_reset)();
 	void (*log_str)(const char *str);
 	void (*log_int)(uint32_t n);
 };
