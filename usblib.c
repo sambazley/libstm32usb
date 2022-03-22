@@ -221,6 +221,7 @@ static void find_descriptor(const uint16_t wValue,
 }
 
 enum {
+	REQ_GET_STATUS = 0,
 	REQ_CLEAR_FEATURE = 1,
 	REQ_SET_ADDRESS = 5,
 	REQ_GET_DESCRIPTOR = 6,
@@ -277,6 +278,12 @@ static void on_control_out_interface(struct usb_setup_packet *sp)
 static void on_control_out_device(volatile struct usb_setup_packet *sp)
 {
 	switch (sp->bRequest) {
+		case REQ_GET_STATUS:
+		{
+			uint8_t resp [] = {0, 0};
+			usb_send_data(0, resp, sizeof(resp), sp->wLength);
+			break;
+		}
 		case REQ_GET_DESCRIPTOR:
 		{
 			const uint8_t *addr;
